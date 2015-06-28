@@ -1,0 +1,201 @@
+#!/bin/bash
+#
+# STFU/GTFO license:
+# this program is provided without guarantee and any "support" will be given at my own discretion.
+# if it breaks or does not do what you want, fix it yourself.
+#
+# a script for building a screen-size tile-mosaic-thingy out of colours extracted from an image.
+# by rhowaldt
+#
+# depends: xdpyinfo, imagemagick
+#
+# TODO: create flags for
+# --filter # send output through filter (separate script)
+
+
+#FUNCTIONS AND SHIT
+
+usage()
+{
+cat << EOF
+usage: $0 -i [IMAGE] ([options])
+
+This script makes a mosaic of your image.
+
+OPTIONS:
+   -h Show this message.
+   -i [IMAGE] The image that will be used for the conversion.
+   -d [DIVISOR] A number that is used to calculate the amount of tiles. Default is 8.
+   -r [SIZE] Resize image to SIZE (width) before processing. Smaller=faster, yet gives less vibrant colours. Default is off.
+   -v After processing, open original and result in feh side-by-side.
+   -c [AMOUNT]	Amount of colours to extract from original. Default is 16.
+   -o [FILENAME] The filename to save the image to. Default is moarsaic-result.png.
+   -s STFU (Silencio). Warning: Will not prompt for huge amounts of tiles!
+   -f [FILTER] Send output through filter FILTER (N/A).
+EOF
+}
+
+#VARIABLES AND SUCH
+
+x="x" # this is pathetic, but who cares?
+MAXTILES=1000 # the amount of tiles needed to receive a prompt
+
+OPT_IMAGE=
+OPT_DIVISOR=8
+OPT_RESIZE=0
+OPT_VIEW=0
+OPT_COLOURS=16
+OPT_OUTPUT="moarsaic-result.png"
+OPT_SILENT=0
+OPT_FILTER=0
+
+while getopts "hi:d:r:vc:o:sf:" opt
+do
+	case $opt in
+		h) usage >&2; exit;;
+		i) OPT_IMAGE="$OPTARG";;
+		d) OPT_DIVISOR=$OPTARG;;
+      r)	OPT_RESIZE="$OPTARG";;
+	   v) OPT_VIEW=1;;
+	   c) OPT_COLOURS="$OPTARG";;
+	   o) OPT_OUTPUT="$OPTARG";;
+	   s) OPT_SILENT=1;;
+	   f) OPT_FILTER=1;;
+      \?) echo "Invalid option: -$OPTARG" >&2; exit 1;;
+      :) echo "Option -$OPTARG requires an argument." >&2; exit 1;;
+	esac
+done
+
+#THE WORKINGS
+
+# 1. wanna know how many tiles
+read RES_X RES_Y <<<$(xdpyinfo | grep dimensions | awk '{print $2}' | awk -Fx '{print $1, $2}') # determine screen resolution: thanksss http://superuser.com/questions/418699
+
+SMALLEST=$(( RES_X < RES_Y ? RES_X : RES_Y )) #find the smallest side
+if [[ $SMALLEST -eq $RES_X ]]; then
+   TILESIZE_X=$(( SMALLEST/OPT_DIVISOR )) #make sure still X=X
+   TILESIZE_Y=$TILESIZE_X # make them square
+else [[ $SMALLEST -eq $RES_Y ]]
+   TILESIZE_Y=$(( SMALLEST/OPT_DIVISOR ))
+   TILESIZE_X=$TILESIZE_Y
+fi
+TILES_X=$(( ( RES_X/TILESIZE_X ) + 1 )) #the amount of tiles along one side will always be 1 greater than the amount that fits - for now
+TILES_Y=$(( ( RES_Y/TILESIZE_Y ) + 1 )) #because what happens when it fits exactly...
+TILES=$(( TILES_X * TILES_Y ))
+
+IMGDIM=$(identify "$OPT_IMAGE" | awk '{ print $3 }')
+
+if [ $OPT_SILENT == 0 ]
+then
+	echo
+	echo "* * * * * M O A R S A I C * * * * *"
+	echo
+	echo "Image: $OPT_IMAGE ($IMGDIM)"
+	echo "Screen Resolution: $RES_X$x$RES_Y"
+	echo "Tilesize: $TILESIZE_X$x$TILESIZE_Y"
+	echo "Tiles: $TILES ($TILES_X$x$TILES_Y)"
+	echo
+
+	# make sure you really want to hang your terminal
+	if [ "$TILES" -ge "$MAXTILES" ]
+	then
+		while true; do
+			read -p "Mate, this will create $TILES tiles. That's quite a lot. Proceed? " yn
+			case $yn in
+				[Yy]* ) echo "Splendid Superninja, let'ssssssss do it!"; echo; break;;
+				[Nn]* ) echo "Baibai."; exit;;
+				* ) echo "Answer yes or no. It's not that difficult. Let's try again."; echo;;
+			esac
+		done
+	fi
+fi
+# 2. create a colour palette from the temporary image
+
+# resize the image to save loads on speed with large wallpapers etc
+if [ $OPT_RESIZE != 0 ]
+then
+	[ $OPT_SILENT == 0 ] && echo "Resizing image to a width of $OPT_RESIZE..."
+	convert "$OPT_IMAGE" -resize $OPT_RESIZE tmp_image.png
+	WORK_IMAGE=tmp_image.png
+else
+	WORK_IMAGE="$OPT_IMAGE"
+fi
+
+[ $OPT_SILENT == 0 ] && echo "Creating colour palette for $OPT_COLOURS colours..."
+PALETTE=$(convert "$WORK_IMAGE" -colors $OPT_COLOURS -format "%c" histogram:info:)
+[ -e tmp_image.png ] && rm tmp_image.png # check for tmp_image and remove if found
+HEXLIST=$(echo "$PALETTE" | sed 's/^.*\#\(.*\) srgb.*/\1/g') #grab just the numbers
+COL=("0" "8" "1" "9" "2" "A" "3" "B" "4" "C" "5" "D" "6" "E" "7" "F"); #these numbers need to be added to the front of the previous
+q=0
+
+declare -a COLOURS
+
+while read line; do
+      COLOURS=("${COLOURS[@]}" "$line"); #concatenate the shit.
+      let q=q+1
+done <<< "$HEXLIST"
+
+# 3. get enough colours to fill all the tiles
+# pick randomly from the 16-colour list, removing each pick until none are left. repeat until all tiles are filled.
+declare -a COLOURTILES
+while [[ ${#COLOURTILES[@]} -lt $TILES ]] #check whether we are at $TILES yet.
+do
+   for index in `shuf --input-range=0-$(( ${#COLOURS[*]} - 1 )) | head -${TILES}`
+	do
+		COLOURTILES=("${COLOURTILES[@]}" "${COLOURS[$index]}")
+	done
+done
+
+# 4. build a tile-mosaic-thingy out of the colours
+[ $OPT_SILENT == 0 ] && echo "Grab the lube in eager anticipation. Placing colours..."
+[ $OPT_SILENT == 0 ] && echo
+
+# convert into imagemagick xc-tags (xc:#222222) and arrange in grid through append+/-
+COLLINE="(" # the line with the colour setup
+xcount=1
+ycount=1
+for (( i=0; i<${#COLOURTILES[@]}; i++ ))
+do
+	# echo "ycount: $ycount - xcount: $xcount" #debug for correct iteration
+	if [ $ycount -lt $TILES_Y ]
+	then
+		if [ $xcount -lt $TILES_X ]
+			then
+			COLLINE+=" xc:#${COLOURTILES[i]}"
+			xcount=$((xcount + 1))
+		else
+			COLLINE+=" xc:#${COLOURTILES[i]} +append ) -append ("
+			xcount=1
+			ycount=$((ycount + 1))
+		fi
+		
+	else # final row, final column
+		
+		if [ $xcount -lt $TILES_X ]
+			then
+			COLLINE+=" xc:#${COLOURTILES[i]}"
+			xcount=$((xcount + 1))
+		else # final colour
+			COLLINE+=" xc:#${COLOURTILES[i]} +append ) -append"
+			break
+		fi
+	fi
+done
+
+# echo "$COLLINE" # debug for correct imagemagick syntax
+
+convert $COLLINE -filter point -resize "$RES_X$x$RES_Y"\! $OPT_OUTPUT
+
+# open original and result in feh side-by-side
+if [ "$OPT_VIEW" == 1 ]
+then
+	feh -m -H 410 -W 800 -E 400 -y 400 $OPT_IMAGE $OPT_OUTPUT
+fi
+
+# Slight preparation for the filter-future:
+[ $OPT_SILENT == 0 ] && [ $OPT_FILTER == 1 ] && echo "Sorry, no filters yet."
+
+[ $OPT_SILENT == 0 ] && echo
+[ $OPT_SILENT == 0 ] && echo "C'est fini. Saved as $OPT_OUTPUT"
+
+exit
