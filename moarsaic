@@ -9,9 +9,6 @@
 #
 # depends: xdpyinfo, imagemagick
 #
-# TODO: create flags for
-# --filter # send output through filter (separate script)
-
 
 #FUNCTIONS AND SHIT
 
@@ -31,7 +28,7 @@ OPTIONS:
    -c [AMOUNT]	Amount of colours to extract from original. Default is 16.
    -o [FILENAME] The filename to save the image to. Default is moarsaic-result.png.
    -s STFU (Silencio). Warning: Will not prompt for huge amounts of tiles!
-   -f [FILTER] Send output through filter FILTER (N/A).
+   -f [FILTER] Send output through filter FILTER. Current filters: 1. Gauss; 2. Triangle. Both "-f gauss" and "-f 1" may be used.
 EOF
 }
 
@@ -60,7 +57,7 @@ do
 	   c) OPT_COLOURS="$OPTARG";;
 	   o) OPT_OUTPUT="$OPTARG";;
 	   s) OPT_SILENT=1;;
-	   f) OPT_FILTER=1;;
+	   f) OPT_FILTER="$OPTARG";;
       \?) echo "Invalid option: -$OPTARG" >&2; exit 1;;
       :) echo "Option -$OPTARG requires an argument." >&2; exit 1;;
 	esac
@@ -182,9 +179,21 @@ do
 	fi
 done
 
-# Slight preparation for the filter-future:
-[ $OPT_SILENT == 0 ] && [ $OPT_FILTER == 1 ] && echo "Sorry, no filters yet."
-FILTERS=""
+# Filters:
+if [ $OPT_FILTER != 0 ]
+then
+	# the filters:
+	GAUSS="-filter gaussian -define filter:blur=0.3" # nice easy blur
+	TRIANGLE="-filter triangle -define filter:blur=0.4" # adds spaces between the tiles for values below 0.5 (probably a 'bug')
+
+	case "$OPT_FILTER" in
+		1|gauss) FILTERS="$GAUSS"; filtername="Gauss";;
+		2|triangle) FILTERS="$TRIANGLE"; filtername="Triangle";;
+		*) FILTERS=""; filtername="no"
+	esac
+	
+	[ $OPT_SILENT == 0 ] && echo "Applying $filtername filter..."
+fi
 
 convert $COLLINE -filter point $FILTERS -resize "$RES_X$x$RES_Y"\! $OPT_OUTPUT
 
