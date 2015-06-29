@@ -83,7 +83,7 @@ TILES_X=$(( ( RES_X/TILESIZE_X ) + 1 )) #the amount of tiles along one side will
 TILES_Y=$(( ( RES_Y/TILESIZE_Y ) + 1 )) #because what happens when it fits exactly...
 TILES=$(( TILES_X * TILES_Y ))
 
-IMGDIM=$(identify "$OPT_IMAGE" | awk '{ print $3 }')
+IMGDIM=$(identify "$OPT_IMAGE" | awk '{ print $3 }') # grab dimensions of the original
 
 if [ $OPT_SILENT == 0 ]
 then
@@ -182,18 +182,17 @@ do
 	fi
 done
 
-# echo "$COLLINE" # debug for correct imagemagick syntax
+# Slight preparation for the filter-future:
+[ $OPT_SILENT == 0 ] && [ $OPT_FILTER == 1 ] && echo "Sorry, no filters yet."
+FILTERS=""
 
-convert $COLLINE -filter point -resize "$RES_X$x$RES_Y"\! $OPT_OUTPUT
+convert $COLLINE -filter point $FILTERS -resize "$RES_X$x$RES_Y"\! $OPT_OUTPUT
 
 # open original and result in feh side-by-side
 if [ "$OPT_VIEW" == 1 ]
 then
 	feh -m -H 410 -W 800 -E 400 -y 400 $OPT_IMAGE $OPT_OUTPUT
 fi
-
-# Slight preparation for the filter-future:
-[ $OPT_SILENT == 0 ] && [ $OPT_FILTER == 1 ] && echo "Sorry, no filters yet."
 
 [ $OPT_SILENT == 0 ] && echo
 [ $OPT_SILENT == 0 ] && echo "C'est fini. Saved as $OPT_OUTPUT"
